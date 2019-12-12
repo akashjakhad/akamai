@@ -1,0 +1,2 @@
+ffmpeg -y -i udp://@:50000 -c copy -hls_segment_type fmp4 -hls_time 6 -hls_list_size 10 -hls_flags delete_segments+append_list+split_by_time -hls_playlist_type event ~/Sites/foo/index_4000.m3u8
+

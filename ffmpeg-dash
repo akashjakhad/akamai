@@ -1,0 +1,41 @@
+ffmpeg -i /mnt/network/vod/temp/bigbuckbunny720p30mbmp4.mp4 -map 0 -map 0 -c:a libfdk_aac -c:v libx264 -b:v:0 800k -b:v:1 300k -s:v:1 320x170 -profile:v:1 baseline -profile:v:0 main -bf 1 -keyint_min 120 -g 120 -sc_threshold 0 -b_strategy 0 -ar:a:1 22050 -use_timeline 1 -use_template 1 window_size 5 -adaptation_sets "id=0,streams=v id=1,streams=a" -f dash  /mnt/network/streamline/chunks/Test/MultitvAd-h264.mpd
+
+
+ffmpeg -re -i "udp://225.100.9.117:30120?pkt_size=1316&fifo_size=50000000&overrun_nonfatal=1" -map 0 -map 0 -map 0 -b:v:0 800k -b:v:1 300k -b:v:2 500k -s:v:0 640x360 -s:v:1 320x170 -s:v:1 480x320 -quality realtime -speed 7 -threads 8 -row-mt 1 -tile-columns 2 -frame-parallel 1 -use_timeline 1 -use_template 1 -window_size 3 -adaptation_sets "id=0,streams=v id=1,streams=a" -f webm "/var/www/html/media/zee.mpd"
+
+
+STORAGE="/mnt/network/streamline/chunks/"
+TITLE=`cat $txtfile | jq .data[$i].job_title | sed 's/\"//g'`
+for (( im=0; im < ${FORMAT_COUNT}; im++ ))
+						do
+							VIDEO_BIT=`cat $txtfile | jq .data[$i].flavourInfo[$im].video_bitrate | sed 's/\"//g'`
+							FLAVOURTITLE=`cat $txtfile | jq .data[$i].flavourInfo[$im].flavour_title | sed 's/\"//g'`
+							VIDEOFORMAT=`cat $txtfile | jq .data[$i].flavourInfo[$im].video_format | sed 's/\"//g'`
+							VIDEOCODEC=`cat $txtfile | jq .data[$i].flavourInfo[$im].video_codec | sed 's/\"//g'`
+							VIDEOBITRATE=`cat $txtfile | jq .data[$i].flavourInfo[$im].video_bitrate | sed 's/\"//g'`
+							VIDEOFRAME=`cat $txtfile | jq .data[$i].flavourInfo[$im].frame_rate | sed 's/\"//g'`
+							SCREENSIZE=`cat $txtfile | jq .data[$i].flavourInfo[$im].screen_resolution | sed 's/\"//g'`
+							RATIO=`cat $txtfile | jq .data[$i].flavourInfo[$im].aspect_ratio | sed 's/\"//g'`
+							AUDIO_BIT=`cat $txtfile | jq .data[$i].flavourInfo[$im].audio_bitrate | sed 's/\"//g'`
+							AUDIOCODEC=`cat $txtfile | jq .data[$i].flavourInfo[$im].audio_codec | sed 's/\"//g'`
+printf "%s"" -map 0"  >> "$STORAGE$JOBTITLE"/map.bkp
+printf "%s"" -b:v:"$im" "$VIDEOBITRATE""  >> "$STORAGE$JOBTITLE"/v_bitrate.bkp
+printf "%s"" -s:v:"$im" "$SCREENSIZE""  >> "$STORAGE$JOBTITLE"/s_bitrate.bkp
+printf "%s"" -ar:a:"$im" "$AUDIO_BIT""  >> "$STORAGE$JOBTITLE"/a_bitrate.bkp
+
+
+Dash_Map=`cat ""$STORAGE$JOBTITLE"/map.bkp"`
+Dash_VBit=`cat ""$STORAGE$JOBTITLE"/v_bitrate.bkp"`
+Dash_ABit=`cat ""$STORAGE$JOBTITLE"/a_bitrate.bkp"`
+Dash_Screen=`cat ""$STORAGE$JOBTITLE"/s_bitrate.bkp"`
+
+
+					if [ "$DASH" -eq 1 ];then
+						echo -e "\nDash Coversion Starts at "`date`"" >> "$curl_log"
+						ffmpeg -i "$SOURCE" $Dash_Map -vcodec libx264 $Dash_VBit $Dash_Screen -c:a aac  -use_timeline 1 -use_template 1
+-window_size 5 -adaptation_sets "id=0,streams=v id=1,streams=a" -bf 1 -keyint_min 120 -g 120 -sc_threshold 0 -b_strategy 0 -f dash "$STORAGE$JOBTITLE"/"$JOBTITLE"-h264.mpd
+						MPDurl=""$cloudfront"/"$JOBTITLE"/"$JOBTITLE"-h264.mpd"
+						echo "DASH : "$MPDurl"" >> "$curl_log"
+						echo "Dash Coversion Completed at "`date`"" >> "$curl_log"
+					fi
+					       done	

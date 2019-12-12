@@ -1,0 +1,212 @@
+#!/bin/bash
+while true
+do
+
+BASEURL="http://streamline.multitvsolution.com/transcoderapi/"
+GETAPI=""$BASEURL"livejobs?server=idea1"
+UPDATEAPI=""$BASEURL"job_update/"
+OUTPUTAPI=""$BASEURL"output_update/"
+txtfile=/home/live/transcoder.txt
+OUTPUT="/usr/nfs/chunks-z/"
+TEMPDIR="/home/live/temp/"
+apifile="/home/live/log/live_api.log"
+curl_log="/home/live/log/live_log.log"
+curl_fail="/home/live/log/live_fail.log"
+SAMPLEFILE="/home/live/sample.txt"
+SAM_M3U8="/home/live/sample_m3u8.txt"
+BKP_M3U8="/home/live/m3u8.bkp"
+OUTPUTWOWZA=/home/live/temp/
+#mkdir -p /vscripts /vscripts/live /vscripts/live/temp /var/www/html/live
+
+curl -s $GETAPI > $txtfile
+MAPID=`cat $txtfile | jq -r .data[$i].id | wc -l`
+if [ "$MAPID" = 0 ]; then
+	echo "no data"
+else
+	tLen=`cat $txtfile | jq -r .data[$i].job_id | wc -l`
+	echo "tLen: $tLen"
+#exit
+	sleep 1
+	for (( i=0; i < ${tLen}; i++ ))
+		do
+		######JOB ID INFORMATION######
+		JOBID=`cat $txtfile | jq .data[$i].job_id | sed 's/\"//g'`
+		TITLE=`cat $txtfile | jq .data[$i].job_title | sed 's/\"//g'`
+		JOBTITLE="$(echo "$TITLE" | tr -dc '[:alnum:]\n\r' )"
+		echo -e "\n###################################################################################"  >> "$apifile"
+        cat < $txtfile >> $apifile
+        echo -e "\n###################################################################################" >> "$curl_log"
+		echo "####Transcoding of JobID:"$JOBID" having JobTitle:"$JOBTITLE" Started at "`date`"####"  >> "$curl_log"
+		START=$(date +%s);
+
+		LOGO=`cat $txtfile | jq .data[$i].logo | sed 's/\"//g'`
+		TYPE=`cat $txtfile | jq .data[$i].type | sed 's/\"//g'`
+		INPUTTYPE=`cat $txtfile | jq .data[$i].input_type | sed 's/\"//g'`
+		INPUTFORMAT=`cat $txtfile | jq .data[$i].input_format | sed 's/\"//g'`
+		SOURCE=`cat $txtfile | jq .data[$i].input_stream | sed 's/\"//g'`
+		echo "[ SOURCE : "$SOURCE" ]" >> "$curl_log"
+		OUTPUTFORMAT=`cat $txtfile | jq .data[$i].output_format| sed 's/\"//g'`
+		echo "[ OUTPUT FORMAT : "$OUTPUTFORMAT" ]" >> "$curl_log"
+		livestreamname=""$TEMPDIR""$JOBTITLE"_"$JOBID""
+		livestreamname2=""$TEMPDIR""$JOBTITLE"_"$JOBID".sh"
+
+		latency=$(timeout 15 ffprobe "$SOURCE"  2>&1 | grep start | awk '{print $4}' | sed s'/.$//' | cut -d. -f1)
+		if [[ "$INPUTFORMAT" = RTMP ]]; then
+			latency=$(timeout 15 ffprobe "$SOURCE"  2>&1 | grep Video: | awk '{print $12}')
+		fi
+		if [ ! -z "$latency" ] && [ "$latency" -gt 0 ];then
+			mkdir -p "$OUTPUT""$JOBTITLE"
+			if [ $? -ne 0 ] ; then
+    			echo "Directory Creation Failed at "$OUTPUT""$JOBTITLE"" >> "$curl_log"
+    			exit 0
+    		fi
+    		######INPUT FILE INFORMATION GET######
+    		INPUT_INFO="$(ffprobe -v quiet -print_format json  -show_streams "$SOURCE" 2>&1)"
+    		VVBit_Input=`echo "$INPUT_INFO" | jq .streams[0].bit_rate | sed 's/\"//g'`
+			VBit_Input="$(($VVBit_Input/1024))"
+			Frame_Input=`echo "$INPUT_INFO" | jq .streams[0].avg_frame_rate | sed 's/\"//g' | sed "s/[/].*//"`
+			AABit_Input=`echo "$INPUT_INFO" | jq .streams[1].bit_rate | sed 's/\"//g'`
+			ABit_Input="$(($AABit_Input/1024))"
+			Width_Input=`echo "$INPUT_INFO" | jq .streams[0].width | sed 's/\"//g'`
+			Height_Input=`echo "$INPUT_INFO" | jq .streams[0].height | sed 's/\"//g'`
+
+			Check_VBit=`cat $txtfile | jq .data[$i].flavourInfo[0].video_bitrate | sed 's/\"//g' | sed s'/.$//'`
+			Check_Frame=`cat $txtfile | jq .data[$i].flavourInfo[0].frame_rate | sed 's/\"//g'`
+			Check_Width=`cat $txtfile | jq .data[$i].flavourInfo[0].screen_resolution | sed 's/\"//g' | sed 's;x.*;;'`
+			Check_Height=`cat $txtfile | jq .data[$i].flavourInfo[0].screen_resolution | sed 's/\"//g' | sed 's:.*x::'`
+			Check_Ratio=`cat $txtfile | jq .data[$i].flavourInfo[0].aspect_ratio | sed 's/\"//g'`
+			Check_ABit=`cat $txtfile | jq .data[$i].flavourInfo[0].audio_bitrate | sed 's/\"//g' | sed s'/.$//'`
+			#if [ "$VBit_Input" -ge "$Check_VBit" ] && [ "$Frame_Input" -ge "$Check_Frame" ] && [ "$Width_Input" -ge "$Check_Width" ] && [ "$Height_Input" -ge "$Check_Height" ] && [ "$ABit_Input" -ge "$Check_ABit" ]; then
+			#if  [ "$Frame_Input" -ge "$Check_Frame" ] && [ "$Width_Input" -ge "$Check_Width" ] && [ "$Height_Input" -ge "$Check_Height" ] && [ "$ABit_Input" -ge "$Check_ABit" ]; then
+			#	echo SUCESS
+			
+			if [[ "$INPUTFORMAT" = UDP ]]; then
+				SOURCE="\"$SOURCE?pkt_size=1316&fifo_size=50000000&overrun_nonfatal=1"\"
+			fi
+
+			###### FLAVOUR INFORMATION ######
+			FORMAT_COUNT=`cat $txtfile | jq -r .data[$i].flavourInfo[].flavour_title | wc -l`
+			echo "[ Format Count: "$FORMAT_COUNT" ]" >> "$curl_log" 
+			curl -X PUT -d "status=1" ""$UPDATEAPI""$JOBID"" >> "$curl_log"
+			for (( im=0; im < ${FORMAT_COUNT}; im++ ))
+				do
+					FLAVOURTITLE=`cat $txtfile | jq .data[$i].flavourInfo[$im].flavour_title | sed 's/\"//g'`
+					OUTSTREAM=`cat $txtfile | jq .data[$i].flavourInfo[$im].output_stream | sed 's/\"//g'`
+					echo -e "\n[Processing Flavor: "$FLAVOURTITLE"]" >> "$curl_log" 
+					mkdir -p ""$OUTPUT""$JOBTITLE"/"$OUTSTREAM""
+					VIDEOCODEC=`cat $txtfile | jq .data[$i].flavourInfo[$im].video_codec | sed 's/\"//g'`
+					VIDEOBITRATE=`cat $txtfile | jq .data[$i].flavourInfo[$im].video_bitrate | sed 's/\"//g'`
+					VIDEOFRAME=`cat $txtfile | jq .data[$i].flavourInfo[$im].frame_rate | sed 's/\"//g'`
+					PRESET=`cat $txtfile | jq .data[$i].flavourInfo[$im].preset | sed 's/\"//g'`
+					AUDIOCODEC=`cat $txtfile | jq .data[$i].flavourInfo[$im].audio_codec | sed 's/\"//g'`
+					AUDIO_BIT=`cat $txtfile | jq .data[$i].flavourInfo[$im].audio_bitrate | sed 's/\"//g'`
+					AUDIOCHANNEL=`cat $txtfile | jq .data[$i].flavourInfo[$im].channel | sed 's/\"//g'`
+					AUDIOSAMPLERATE=`cat $txtfile | jq .data[$i].flavourInfo[$im].audio_samplerate | sed 's/\"//g'`
+					PROFILE=`cat $txtfile | jq .data[$i].flavourInfo[$im].profile | sed 's/\"//g'`
+					SCREENSIZE=`cat $txtfile | jq .data[$i].flavourInfo[$im].screen_resolution | sed 's/\"//g'`
+					RATIO=`cat $txtfile | jq .data[$i].flavourInfo[$im].aspect_ratio | sed 's/\"//g'`
+                    OUTPUTID=`cat $txtfile | jq .data[$i].flavourInfo[$im].output_id | sed 's/\"//g'`
+                    FLAVOURID=`cat $txtfile | jq .data[$i].flavourInfo[$im].flavour_id | sed 's/\"//g'`
+					echo -e "\n[ Video Details : "$VIDEOCODEC", "$VIDEOBITRATE", "$VIDEOFRAME","$PRESET", "$SCREENSIZE", "$PROFILE", "$RATIO" ]"  >> "$curl_log"
+					echo "[ Audio Details : "$AUDIOCODEC", "$AUDIO_BIT", "$AUDIOSAMPLERATE", "$AUDIOCHANNEL" ]"  >> "$curl_log"
+					echo "[ Outstream : "$OUTSTREAM" ]" >> "$curl_log"
+					GOP=1
+					GOP="$(($VIDEOFRAME*2))"
+					curl -i -X PUT -d "job_id=$JOBID" -d "status=1" ""$OUTPUTAPI""$OUTPUTID"" >> "$curl_log"
+					echo -e "\nCreating Script at "`date`"" >> "$curl_log"
+					if [[ "$OUTPUTFORMAT" = HLS ]]; then
+						if [[ -f "$livestreamname" ]]; then	
+							#printf ""%s" -vcodec "$VIDEOCODEC" -b:v "$VIDEOBITRATE" -r "$VIDEOFRAME" -g "$GOP" -s "$SCREENSIZE" -aspect "$RATIO" -tune zerolatency -preset veryfast -acodec "$AUDIOCODEC" -ab "$AUDIO_BIT" -ar 44100 -ac "$AUDIOCHANNEL" -strict -2 -use_localtime 1 -use_localtime_mkdir 1 -hls_flags second_level_segment_index -hls_time 10 -hls_list_size 0 -hls_segment_filename "$JOBTITLE"/"$OUTSTREAM"/%Y-%m-%d/"$OUTSTREAM"-%s-%%04d.ts" ""$JOBTITLE"/"$OUTSTREAM"/`date "+%Y-%m-%d"`/"$OUTSTREAM".m3u8" >> "$livestreamname"
+							printf ""%s"-vcodec "$VIDEOCODEC" -b:v "$VIDEOBITRATE" -r "$VIDEOFRAME" -g "$GOP" -s "$SCREENSIZE" -aspect "$RATIO" -profile:v "$PROFILE" -tune zerolatency -preset veryfast -acodec "$AUDIOCODEC" -ab "$AUDIO_BIT" -ar "$AUDIOSAMPLERATE" -ac "$AUDIOCHANNEL" -strict -2 -use_localtime 1 -use_localtime_mkdir 1 -hls_flags second_level_segment_index -hls_time 10 -hls_list_size 0 -hls_segment_filename"  >> "$livestreamname"
+							cp "$SAM_M3U8" "$BKP_M3U8"
+							sed -i 's*C_NAME*'$JOBTITLE'*g' "$BKP_M3U8"
+							sed -i 's*FAV*'$OUTSTREAM'*g' "$BKP_M3U8"
+							cat "$BKP_M3U8"  >> "$livestreamname"
+							rm "$BKP_M3U8"				
+
+						else
+							cp "$SAMPLEFILE" "$livestreamname"
+							#printf ""%s"ffmpeg -i "$SOURCE" -vcodec "$VIDEOCODEC" -b:v "$VIDEOBITRATE" -r "$VIDEOFRAME" -g "$GOP" -s "$SCREENSIZE" -aspect "$RATIO" -tune zerolatency -preset veryfast -acodec "$AUDIOCODEC" -ab "$AUDIO_BIT" -ar 44100 -ac "$AUDIOCHANNEL" -strict -2 -use_localtime 1 -use_localtime_mkdir 1 -hls_flags second_level_segment_index -hls_time 10 -hls_list_size 0 -hls_segment_filename "$JOBTITLE"/"$OUTSTREAM"/%Y-%m-%d/"$OUTSTREAM"-%s-%%04d.ts" ""$JOBTITLE"/"$OUTSTREAM"/`date "+%Y-%m-%d"`/"$OUTSTREAM".m3u8" >> "$livestreamname"
+							printf ""%s"ffmpeg -i "$SOURCE" -vcodec "$VIDEOCODEC" -b:v "$VIDEOBITRATE" -r "$VIDEOFRAME" -g "$GOP" -s "$SCREENSIZE" -aspect "$RATIO" -profile:v "$PROFILE" -tune zerolatency -preset veryfast -acodec "$AUDIOCODEC" -ab "$AUDIO_BIT" -ar "$AUDIOSAMPLERATE" -ac "$AUDIOCHANNEL" -strict -2 -use_localtime 1 -use_localtime_mkdir 1 -hls_flags second_level_segment_index -hls_time 10 -hls_list_size 0 -hls_segment_filename" >> "$livestreamname"					
+							cp "$SAM_M3U8" "$BKP_M3U8"
+        						sed -i 's*C_NAME*'$JOBTITLE'*g' "$BKP_M3U8"
+        						sed -i 's*FAV*'$OUTSTREAM'*g' "$BKP_M3U8"
+							cat "$BKP_M3U8" >> "$livestreamname"
+							rm "$BKP_M3U8"
+						fi
+					elif [[ "$OUTPUTFORMAT" = RTMP ]]; then
+						if [[ -f "$livestreamname" ]]; then
+							printf ""%s" -vcodec $VIDEOCODEC -b:v $VIDEOBITRATE  -r $VIDEOFRAME -g $GOP -s $SCREENSIZE -aspect $RATIO -profile:v "$PROFILE"  -tune zerolatency -preset $PRESET -acodec $AUDIOCODEC  -ab $AUDIO_BIT  -ar "$AUDIOSAMPLERATE" -ac "$AUDIOCHANNEL" -strict -2 -f flv "$OUTSTREAM"" >> "$livestreamname"
+						else				
+							printf " "%s"ffmpeg -i $SOURCE -vcodec $VIDEOCODEC -b:v $VIDEOBITRATE  -r $VIDEOFRAME -g $GOP -s $SCREENSIZE -aspect $RATIO -profile:v "$PROFILE" -tune zerolatency -preset $PRESET -acodec $AUDIOCODEC  -ab $AUDIO_BIT -ar "$AUDIOSAMPLERATE" -ac "$AUDIOCHANNEL" -strict -2 -f flv "$OUTSTREAM"" > "$livestreamname"
+						fi
+						VIDEO_BIT="$VIDEOBITRATE"
+						AUDIO_BIT="$AUDIO_BIT"
+						toBeReplaced="k"
+						replaceWith=""
+						videoBitrate="${VIDEO_BIT/$toBeReplaced/$replaceWith}"
+						audioBitrate="${AUDIO_BIT/$toBeReplaced/$replaceWith}"
+						WIDTH=`echo "$SCREENSIZE" | sed 's;x.*;;'`
+						HEIGHT=`echo "$SCREENSIZE" | sed 's:.*x::'`
+						SRC=`echo  "$OUTSTREAM" | sed 's:.*/::'`
+						#OUTPUTWOWZA=/usr/local/WowzaStreamingEngine/content/
+						echo -e "\nCreating Smile File at "$OUTPUTWOWZA" Wowza Location" >> "$curl_log"
+						if [ -f "$OUTPUTWOWZA"/"$JOBTITLE"."smil" ]
+							then
+								echo "<video height=\"$HEIGHT\" src=\"$SRC\" systemLanguage=\"eng\" width=\"$WIDTH\">" >> "$OUTPUTWOWZA"/"$JOBTITLE"."smil"
+								echo "<param name=\"videoBitrate\" value=\"$videoBitrate"000"\"  valuetype=\"data\"></param>" >> "$OUTPUTWOWZA"/"$JOBTITLE"."smil"
+								echo "<param name=\"audioBitrate\" value=\"$audioBitrate"000"\"  valuetype=\"data\"></param></video>" >> "$OUTPUTWOWZA"/"$JOBTITLE"."smil"
+						else
+								echo "<?xml version=\"1.0\" encoding=\"UTF-8\"?>" > "$OUTPUTWOWZA"/"$JOBTITLE"."smil"
+								echo "<smil title=\"$TITLE\">" >> "$OUTPUTWOWZA"/"$JOBTITLE"."smil"
+								echo "<body>" >> "$OUTPUTWOWZA"/"$JOBTITLE"."smil"
+								echo "<switch>" >> "$OUTPUTWOWZA"/"$JOBTITLE"."smil"
+								echo "<video height=\"$HEIGHT\" src=\"$SRC\" systemLanguage=\"eng\" width=\"$WIDTH\">" >> "$OUTPUTWOWZA"/"$JOBTITLE"."smil"
+								echo "<param name=\"videoBitrate\" value=\"$videoBitrate"000"\"  valuetype=\"data\"></param>" >> "$OUTPUTWOWZA"/"$JOBTITLE"."smil"
+								echo "<param name=\"audioBitrate\" value=\"$audioBitrate"000"\"  valuetype=\"data\"></param></video>" >> "$OUTPUTWOWZA"/"$JOBTITLE"."smil"
+						fi
+
+					fi
+					echo "Completed Script Creation at "`date`"" >> "$curl_log"
+					curl -i -X PUT -d "status=2" -d "job_id=$JOBID" ""$OUTPUTAPI""$OUTPUTID"" >> "$curl_log"
+
+			done
+	 		mv "$livestreamname" "$livestreamname2"
+			chmod 777 "$livestreamname2"
+			if [[ "$OUTPUTFORMAT" = HLS ]]; then
+				#URLHLS=http://stream-idea.multitvsolution.com/live/"$JOBTITLE"-z/mid.m3u8			        
+				echo -e "\n[ HLS URL:"$URLHLS" ]"
+			else
+				echo "</switch></body></smil>" >> "$OUTPUTWOWZA"/"$JOBTITLE"."smil"
+				nohup sshpass -p 'MultitV@008' scp "$OUTPUTWOWZA"/"$JOBTITLE"."smil" multitv023@150.242.73.35:/usr/local/WowzaStreamingEngine/content/ 
+				URL=`echo "$OUTSTREAM" | sed 's:/[^/]*$::'`
+				echo "$URL"
+				URL2=`echo "$URL" | sed 's:.*//::'`
+				echo "$URL2"
+				toADD="http://"
+				URLHLS=""$toADD""$URL2"/smil:"$JOBTITLE".smil/playlist.m3u8"
+				#SS=`echo "$OUTSTREAM" | awk '{print $NF}' FS=/ | cut -d _ -f1`
+				#URLHLS=http://150.242.73.246:81/hls/"$SS".m3u8			        
+				echo -e "\n[ HLS URL:"$URLHLS" ]"			
+			fi
+			END=$(date +%s);
+            TIME=`echo $((END-START)) | awk '{print int($1/60)":"int($1%60)}'`
+            echo "[ Total Time : "$TIME" ]" >> "$curl_log"
+			sleep 10
+			curl -i -X PUT -d "status=2"  -d "hlsurl=$URLHLS" -d "video_codec=$VIDEOCODEC" -d "video_bitrate=$VIDEOBITRATE" -d "frame_rate=$VIDEOFRAME" -d "frame_size=$SCREENSIZE" -d "audio_codec=$AUDIOCODEC" -d "audio_bitrate=$AUDIO_BIT" -d "channel=$AUDIOCHANNEL" -d "audio_samplerate=$AUDIOSAMPLERATE" ""$UPDATEAPI""$JOBID"" >> "$curl_log"
+			echo -e "\n####Transcoding of JobID:"$JOBID" having JobTitle:"$JOBTITLE" Completed at "`date`"####"  >> "$curl_log"
+			#else
+			#	echo "^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^" >> "$curl_log"
+			#	echo "Transcoding Parameter Set Higher than Input for JobID:"$JOBID" & JobTitle:"$JOBTITLE"" >> "$curl_log"
+			#	curl -i -X PUT -d "status=3" ""$UPDATEAPI""$JOBID"" >> "$curl_log"
+			#fi
+		else
+			echo "%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%" >> "$curl_log"
+			echo "Error in Input of JobID:"$JOBID" & JobTitle:"$JOBTITLE"" >> "$curl_log"
+			curl -i -X PUT -d "status=3" ""$UPDATEAPI""$JOBID"" >> "$curl_log"
+		fi
+	done
+fi
+sleep 15
+done
+
